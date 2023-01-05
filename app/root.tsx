@@ -1,4 +1,5 @@
-import type { MetaFunction } from "@remix-run/node";
+import type { LoaderFunction, MetaFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import {
   Links,
   LiveReload,
@@ -6,15 +7,78 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useLoaderData,
 } from "@remix-run/react";
+
+import globalStyles from "~/styles/app.css";
+import rainbowStyles from "@rainbow-me/rainbowkit/styles.css";
+
+import type { Chain } from "wagmi";
+import { getDefaultWallets, RainbowKitProvider } from "@rainbow-me/rainbowkit";
+import { configureChains, createClient, goerli, WagmiConfig } from "wagmi";
+import { mainnet } from "wagmi/chains";
+import { alchemyProvider } from "wagmi/providers/alchemy";
+import { publicProvider } from "wagmi/providers/public";
+import { useState } from "react";
+import { APP_NAME } from "./config";
+
+type Env = { ALCHEMY_API_KEY?: string; PUBLIC_ENABLE_TESTNETS?: string };
+
+type LoaderData = { ENV: Env };
+
+export const loader: LoaderFunction = () => {
+  const data: LoaderData = {
+    ENV: {
+      ALCHEMY_API_KEY:
+        process.env.ALCHEMY_ID || "_gg7wSSi0KMBsdKnGVfHDueq6xMB9EkC",
+      PUBLIC_ENABLE_TESTNETS: process.env.PUBLIC_ENABLE_TESTNETS || "false",
+    },
+  };
+
+  return json(data);
+};
 
 export const meta: MetaFunction = () => ({
   charset: "utf-8",
-  title: "New Remix App",
+  title: APP_NAME,
   viewport: "width=device-width,initial-scale=1",
 });
 
+export function links() {
+  return [
+    { rel: "stylesheet", href: globalStyles },
+    { rel: "stylesheet", href: rainbowStyles },
+  ];
+}
+
 export default function App() {
+  const { ENV } = useLoaderData<typeof loader>();
+
+  const [{ client, chains }] = useState(() => {
+    const testChains = ENV.PUBLIC_ENABLE_TESTNETS === "true" ? [goerli] : [];
+
+    const { chains, provider } = configureChains(
+      [mainnet, ...testChains],
+      [alchemyProvider({ apiKey: ENV.ALCHEMY_API_KEY }), publicProvider()],
+    );
+
+    const { connectors } = getDefaultWallets({
+      appName: APP_NAME,
+      chains,
+    });
+
+    const client = createClient({
+      autoConnect: true,
+      connectors,
+      provider,
+    });
+
+    return {
+      client,
+      chains,
+    };
+  });
+
   return (
     <html lang="en">
       <head>
@@ -22,10 +86,16 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <Outlet />
+        {client && chains ? (
+          <WagmiConfig client={client}>
+            <RainbowKitProvider chains={chains as Chain[]}>
+              <Outlet />
+            </RainbowKitProvider>
+          </WagmiConfig>
+        ) : null}
         <ScrollRestoration />
         <Scripts />
-        <LiveReload />
+        {process.env.NODE_ENV === "development" && <LiveReload />}
       </body>
     </html>
   );
